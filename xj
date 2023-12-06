@@ -137,26 +137,23 @@ def merge(transaction, patterns, amount):
             transaction.amount   = amount
     return transaction
 
-sales    = []
-expenses = []
-
 def sum(transactions_per_sender):
     amt = 0
     for t in transactions_per_sender:
        amt += t.amount 
     return amt
 
-if(TransferType.SALES in patterns):
-    for sender, transactions_per_sender in transactions[TransferType.SALES].items():
-        transaction = transactions_per_sender[0]
-        amount      = sum(transactions_per_sender)
-        sales.append(merge(transaction, patterns[TransferType.SALES], amount))
+def get_transaction_data(transferType, patterns, transactions):
+    xs = []
+    if(transferType in patterns):
+        for sender, transactions_per_sender in transactions[transferType].items():
+            transaction = transactions_per_sender[0]
+            amount      = sum(transactions_per_sender)
+            xs.append(merge(transaction, patterns[transferType], amount))
+    return xs
 
-if(TransferType.EXPENSE in patterns):
-    for sender, transactions_per_sender in transactions[TransferType.EXPENSE].items():
-        transaction = transactions_per_sender[0]
-        amount      = sum(transactions_per_sender)
-        expenses.append(merge(transaction, patterns[TransferType.EXPENSE], amount))
+sales    = get_transaction_data(TransferType.SALES,   patterns, transactions)
+expenses = get_transaction_data(TransferType.EXPENSE, patterns, transactions)
 
 def new_line():
     print()
@@ -189,11 +186,6 @@ def set_transaction_data(xs, key, is_verbose_mode):
         print(f"{enum_to_value(k)}: {v}円")
 
     return xs_totals
-
-#
-# Sales section
-#
-expenses_totals = {}
 
 sales_totals    = set_transaction_data(sales, '売上', is_verbose_mode)
 draw_dots()
