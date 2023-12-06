@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+#
+# tax japan (xj)
+#
+import csv
+from datetime import date
+from enum import Enum
+import re
+import sys
+
+csv_paypay_file_path='test/NBG23061Ppgs9gD75e7tEq1P80e11W1xb55pbs.csv'
+
+options = None
+if(len(sys.argv) > 0):
+    options = sys.argv[1:]
+
+is_verbose_mode = True if '-v' in options else False
+
+class TransferType(Enum):
+    SALES   = 1
+    EXPENSE = 2
+    BORROW  = 3
+    NONE    = 4
+
+class Category(Enum):
+    #
+    # 勘定項目
+    #
+    TR =  "旅費・交通費"
+    SO =  "交際費  (原則、損金不算入)"
+    MT =  "会議費"
+    FK =  "福利厚生費"
+    DE =  "消耗品費"
+    BK =  "新聞図書費"
+    ES =  "雑費"
+    ST =  "支払手数料"
+    G1 =  "外注費（個人), 源泉徴収あり"
+    G2 =  "外注費（個人), 源泉徴収なし"
+    BR =  "借入金"
+    SL =  "売上"
+    SR =  "仕入（仕入高）"
+    CM =  "通信費"
+    RT =  "借金返済"
+
+class Transaction:
+    def __init__(self, row):
+        self.date   = date(int(row[0]), int(row[1]), int(row[2]))
+        self.sender = row[7]
+
+        is_income = row[9] != ''
+        self.type = TransferType.SALES  if is_income else TransferType.EXPENSE
+
+        amount = int(row[9]) if is_income else int(row[10])
+        self.amount = int(amount)
+        self.category = None
+
+class Pattern:
+    def __init__(self, line):
+        xs = [x.strip().replace('\u3000', ' ') for x in line.split('|')]
+        self.type     = map_type(xs[0])
+        self.regex    = re.compile('\s+'.join(xs[1].split(' ')))
+        if(len(xs) > 2):
+            self.category = map_category(xs[2])
+        else:
+            self.category = None
+
+def map_type(type):
+    if(type == 'expense'): return TransferType.EXPENSE
+    if(type == 'none'):    return TransferType.NONE
+    if(type == 'sales'):   return TransferType.SALES
+    if(type == 'borrow'):  return TransferType.BORROW
+    return TransferType.NONE
+
+def map_category(category):
+    if(category == 'TR'): return Category.TR
+    if(category == 'SO'): return Category.SO
+    if(category == 'MT'): return Category.MT
+    if(category == 'FK'): return Category.FK 
+    if(category == 'DE'): return Category.DE 
+    if(category == 'BK'): return Category.BK 
+    if(category == 'ES'): return Category.ES 
+    if(category == 'ST'): return Category.ST 
+    if(category == 'G1'): return Category.G1 
+    if(category == 'G2'): return Category.G2 
+    if(category == 'BR'): return Category.BR 
+    if(category == 'SL'): return Category.SL 
+    if(category == 'SR'): return Category.SR 
+    if(category == 'CM'): return Category.CM 
+    if(category == 'BK'): return Category.BK 
+    return None
+
+def enum_to_value(k):
+    if(k):
+        return k.value
+    return "その他"
+
+def get_pattern_file():
+    txt_files = [x for x in sys.argv if x.endswith('.txt')]
+    if(len(txt_files) > 0):
+        return txt_files[0]
+    print("\nyou need pattern file (.txt)\n")    
+    sys.exit()
+
+pattern_file = get_pattern_file()
+
+patterns = {}
+with open(get_pattern_file(), 'r') as file:
+    for line in file:
+        line = line.strip()
+        if (line != '' and not line.startswith('#')):
+            pattern = Pattern(line)
+            if(pattern.type not in patterns):
+                patterns[pattern.type] = []
+
+            patterns[pattern.type].append(pattern)
+
+transactions = {}
+with open(csv_paypay_file_path, 'r', encoding='shift-jis') as file:
+    csv_reader = csv.reader(file)
+
+    for row in list(csv_reader)[1:]:
+        transaction = Transaction(row)
+
+        if(transaction.type not in transactions):
+            transactions[transaction.type] = {}
+
+        if(transaction.sender not in transactions[transaction.type]):
+            transactions[transaction.type][transaction.sender] = []
+
+
+        transactions[transaction.type][transaction.sender].append(transaction)
+
+def merge(transaction, patterns, amount):
+    for pattern in patterns:
+        if(re.match(pattern.regex, transaction.sender)):
+            transaction.category = pattern.category
+            transaction.amount   = amount
+    return transaction
+
+sales    = []
+expenses = []
+
+def sum(transactions_per_sender):
+    amt = 0
+    for t in transactions_per_sender:
+       amt += t.amount 
+    return amt
+
+if(TransferType.SALES in patterns):
+    for sender, transactions_per_sender in transactions[TransferType.SALES].items():
+        transaction = transactions_per_sender[0]
+        amount      = sum(transactions_per_sender)
+        sales.append(merge(transaction, patterns[TransferType.SALES], amount))
+
+if(TransferType.EXPENSE in patterns):
+    for sender, transactions_per_sender in transactions[TransferType.EXPENSE].items():
+        transaction = transactions_per_sender[0]
+        amount      = sum(transactions_per_sender)
+        expenses.append(merge(transaction, patterns[TransferType.EXPENSE], amount))
+
+def new_line():
+    print()
+
+def draw_line():
+    print('-----------------------------------------------------------------------')
+
+def draw_title_and_line(label):
+    new_line()
+    print(label)
+    print('-----------------------------------------------------------------------')
+
+def draw_dots():
+    print('')
+    print('...')
+
+def set_transaction_data(xs, key, is_verbose_mode):
+    xs_totals = {}
+    draw_title_and_line(key)
+    for x in xs:
+        if(is_verbose_mode):
+            print(f"{x.date}, {x.type}, {x.sender[0:20]}, [{x.amount}], {x.category}")
+        if(x.category not in xs_totals):
+            xs_totals[x.category] = 0
+        xs_totals[x.category] += x.amount
+
+    new_line()
+
+    for k, v in xs_totals.items():
+        print(f"{enum_to_value(k)}: {v}円")
+
+    return xs_totals
+
+#
+# Sales section
+#
+expenses_totals = {}
+
+sales_totals    = set_transaction_data(sales, '売上', is_verbose_mode)
+draw_dots()
+expenses_totals = set_transaction_data(expenses, '経費', is_verbose_mode)
